@@ -8,11 +8,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.items
+import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.material3.*
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.juiceydev.pintera.ui.components.CommentsSheetContent
 import org.juiceydev.pintera.ui.components.PinItem
@@ -20,19 +25,26 @@ import org.juiceydev.pintera.ui.components.PinOptionsSheetContent
 import org.juiceydev.pintera.ui.components.SharePinSheetContent
 import kotlin.random.Random
 
+@Suppress("OPT_IN_USAGE")
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun FeedLayout() {
-    // Mock Data using Unsplash Source for better testing visuals
-    val pins = remember {
-        List(40) { index ->
-            val height = Random.nextInt(150, 450)
-            Triple(
-                height, // Height for aspect ratio calculation
-                // Use the same height in the URL to ensure the image aspect ratio matches the item aspect ratio
-                "https://picsum.photos/seed/pintera_$index/400/$height",
-                if (index % 3 == 0) "Aesthetic Inspiration #$index" else null // Optional title
-            )
+    // Mutable State List for Pins to support infinite scrolling
+    val pins = remember { mutableStateListOf<Triple<Int, String, String?>>() }
+    var isLoading by remember { mutableStateOf(false) }
+    
+    // Initial Load
+    LaunchedEffect(Unit) {
+        if (pins.isEmpty()) {
+            val initialPins = List(40) { index ->
+                val height = Random.nextInt(150, 450)
+                Triple(
+                    height,
+                    "https://picsum.photos/seed/pintera_$index/400/$height",
+                    if (index % 3 == 0) "Aesthetic Inspiration #$index" else null
+                )
+            }
+            pins.addAll(initialPins)
         }
     }
 
@@ -41,13 +53,49 @@ fun FeedLayout() {
     var showCommentsSheet by remember { mutableStateOf(false) }
     var selectedPin by remember { mutableStateOf<Triple<Int, String, String?>?>(null) }
     
-    // We need separate sheets or manage the content dynamically
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyStaggeredGridState()
 
     // Handle back press when details are open
     BackHandler(enabled = selectedPin != null) {
         selectedPin = null
+    }
+
+    // Load More Logic
+    fun loadMorePins() {
+        if (isLoading) return
+        isLoading = true
+        scope.launch {
+            delay(1500) // Simulate network delay
+            val startId = pins.size
+            val newPins = List(20) { index ->
+                val id = startId + index
+                val height = Random.nextInt(150, 450)
+                Triple(
+                    height,
+                    "https://picsum.photos/seed/pintera_$id/400/$height",
+                    if (id % 3 == 0) "Aesthetic Inspiration #$id" else null
+                )
+            }
+            pins.addAll(newPins)
+            isLoading = false
+        }
+    }
+
+    // Infinite Scroll Detection
+    val isAtBottom by remember {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val totalItems = layoutInfo.totalItemsCount
+            if (totalItems == 0) return@derivedStateOf false
+            val lastVisibleItemIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            lastVisibleItemIndex >= totalItems - 6 // Trigger load slightly before bottom
+        }
+    }
+
+    LaunchedEffect(isAtBottom) {
+        if (isAtBottom) loadMorePins()
     }
 
     SharedTransitionLayout {
@@ -64,11 +112,12 @@ fun FeedLayout() {
                     LazyVerticalStaggeredGrid(
                         columns = StaggeredGridCells.Adaptive(160.dp),
                         modifier = Modifier.fillMaxSize(),
+                        state = listState,
                         contentPadding = PaddingValues(12.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalItemSpacing = 12.dp
                     ) {
-                        items(pins) { pin ->
+                        items(items = pins) { pin ->
                             val (height, url, title) = pin
                             PinItem(
                                 height = height,
@@ -79,6 +128,19 @@ fun FeedLayout() {
                                 sharedTransitionScope = this@SharedTransitionLayout,
                                 animatedVisibilityScope = this@AnimatedContent
                             )
+                        }
+                        
+                        if (isLoading) {
+                            item(span = StaggeredGridItemSpan.FullLine) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    LoadingIndicator()
+                                }
+                            }
                         }
                     }
                 }
@@ -148,11 +210,6 @@ fun FeedLayout() {
                 containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             ) {
                 CommentsSheetContent(
-                    onDismiss = {
-                        scope.launch { sheetState.hide() }.invokeOnCompletion {
-                            if (!sheetState.isVisible) showCommentsSheet = false
-                        }
-                    }
                 )
             }
         }

@@ -39,9 +39,7 @@ data class Comment(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CommentsSheetContent(
-    onDismiss: () -> Unit
-) {
+fun CommentsSheetContent() {
     var commentText by remember { mutableStateOf("") }
     var replyingTo by remember { mutableStateOf<Comment?>(null) }
     val focusRequester = remember { FocusRequester() }
